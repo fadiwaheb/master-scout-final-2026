@@ -249,6 +249,19 @@ hr{ border-color:var(--glass-bd); }
 .fut-bottom img{ height:20px; border-radius:2px; box-shadow:0 1px 3px rgba(0,0,0,.4); }
 .fut-facts{ text-align:center; color:var(--txt2); font-size:.82rem; margin-top:.5rem; }
 
+/* column legend (מקרא) shown under every table */
+.ms-legend{ direction:rtl; text-align:right; font-size:.8rem; color:var(--txt2);
+  line-height:2; margin:.45rem 0 .2rem; padding:.55rem .85rem;
+  background:rgba(16,208,240,.05); border:1px solid var(--glass-bd);
+  border-radius:10px; }
+.ms-legend code{ color:var(--azure-3); font-family:'Fira Code', monospace;
+  font-size:.74rem; background:rgba(16,208,240,.10); padding:1px 6px;
+  border-radius:5px; direction:ltr; display:inline-block; }
+/* similar-player visual comparison heading */
+.ms-cmp-title{ direction:rtl; text-align:center; color:var(--txt); font-weight:700;
+  font-size:1.02rem; margin:.7rem 0 .35rem; }
+.ms-cmp-title b{ color:var(--azure-3); }
+
 @media (prefers-reduced-motion: reduce){ *{ animation:none !important; } }
 </style>
 """
@@ -363,8 +376,10 @@ _RADAR_ATTRS = ["pace", "shooting", "passing", "dribbling", "defending", "physic
 _RADAR_LABELS = ["Pace", "Shooting", "Passing", "Dribbling", "Defending", "Physical"]
 
 
-def make_radar(players):
-    """Radar/spider chart of the 6 core attributes for one or more players."""
+def make_radar(players, colors=None):
+    """Radar/spider chart of the 6 core attributes for one or more players.
+    `colors` optionally overrides the per-player line colour (e.g. azure vs red
+    for the similar-player comparison)."""
     angles = np.linspace(0, 2 * np.pi, len(_RADAR_ATTRS), endpoint=False).tolist()
     angles += angles[:1]
     fig, ax = plt.subplots(figsize=(4.4, 4.4), subplot_kw=dict(polar=True))
@@ -373,7 +388,7 @@ def make_radar(players):
     for i, p in enumerate(players):
         vals = [float(p[a]) for a in _RADAR_ATTRS]
         vals += vals[:1]
-        c = _PALETTE[i % len(_PALETTE)]
+        c = colors[i] if (colors and i < len(colors)) else _PALETTE[i % len(_PALETTE)]
         ax.plot(angles, vals, color=c, linewidth=2, label=str(p["short_name"]))
         ax.fill(angles, vals, color=c, alpha=.22)
         # value number at each vertex (single-player card only — avoids clutter)
@@ -422,10 +437,10 @@ _FUT_STATS = [("PAC", "pace"), ("SHO", "shooting"), ("PAS", "passing"),
               ("DRI", "dribbling"), ("DEF", "defending"), ("PHY", "physic")]
 
 
-def render_player_card(p):
-    """A FIFA-style (FUT) card — gold (80+) / silver (70-79) / bronze (<70) — with
-    the player photo, OVR, position, 6 stats and the national flag; next to a
-    compact radar. Photo/flag enriched live from EA for players in our data."""
+def _player_card_html(p):
+    """Build the FIFA-style (FUT) card HTML — gold (80+) / silver (70-79) /
+    bronze (<70) — photo, OVR, position, 6 stats and the national flag.
+    Photo/flag enriched live from EA for players in our data."""
     name = str(p["short_name"])
     av = _val(p, "avatar_url")
     flag = _val(p, "nationality_flag_url")
@@ -444,14 +459,16 @@ def render_player_card(p):
     stats_html = "".join(f"<div><b>{s(k)}</b><span>{lbl}</span></div>" for lbl, k in _FUT_STATS)
     photo_html = f"<img src='{av}'>" if av else "<div class='fut-noimg'>⚽</div>"
     flag_html = f"<div class='fut-bottom'><img src='{flag}'></div>" if flag else ""
-    card = (f"<div class='fut-card fut-{tier}'>"
+    return (f"<div class='fut-card fut-{tier}'>"
             f"<div class='fut-top'><div class='fut-ovr'>{ovr if ovr is not None else '—'}</div>"
             f"<div class='fut-pos'>{pos}</div></div>"
             f"<div class='fut-photo'>{photo_html}</div>"
             f"<div class='fut-name'>{last}</div>"
             f"<div class='fut-stats'>{stats_html}</div>{flag_html}</div>")
 
-    # textual details folded in beneath
+
+def _facts_line(p):
+    """The short textual details shown beneath a card."""
     facts = []
     if pd.notna(p.get("age")):
         facts.append(f"גיל {int(p['age'])}")
@@ -466,13 +483,114 @@ def render_player_card(p):
     if p.get("has_event_data"):
         facts.append(f"⚽ {int(p.get('total_goals', 0))} גולים")
         facts.append(f"דאבלים {int(p.get('matches_with_2_plus_goals', 0))}")
+    return " · ".join(facts)
 
+
+def render_player_card(p):
+    """A single player: compact radar next to the FUT card, facts beneath."""
     c1, c2 = st.columns([1, 1])
     with c1:
         st.pyplot(make_radar([p]), use_container_width=True)
     with c2:
-        st.markdown(card, unsafe_allow_html=True)
-    st.markdown(f"<div class='fut-facts'>{' · '.join(facts)}</div>", unsafe_allow_html=True)
+        st.markdown(_player_card_html(p), unsafe_allow_html=True)
+    st.markdown(f"<div class='fut-facts'>{_facts_line(p)}</div>", unsafe_allow_html=True)
+
+
+def render_similar_compare(target_name, dfa):
+    """The 'find similar to X' hero view: the target player and the single closest
+    match overlaid on ONE radar (azure vs red) + their two cards side by side.
+    Returns True if it rendered (both players resolvable in our data)."""
+    if not target_name or dfa is None or dfa.empty:
+        return False
+    target = get_full_row(str(target_name))
+    match_name = str(dfa.iloc[0]["short_name"])
+    match = get_full_row(match_name)
+    if target is None or match is None:
+        return False  # e.g. target came from EA/web and isn't in our table
+
+    sim = dfa.iloc[0].get("similarity")
+    sim_txt = f" · דמיון {float(sim) * 100:.0f}%" if pd.notna(sim) else ""
+    st.markdown(
+        f"<div class='ms-cmp-title'>🔬 השוואה ויזואלית: <b>{target_name}</b> "
+        f"מול ההתאמה הקרובה ביותר <b>{match_name}</b>{sim_txt}</div>",
+        unsafe_allow_html=True)
+
+    mid = st.columns([1, 2, 1])[1]
+    with mid:
+        st.pyplot(make_radar([target, match], colors=["#10d0f0", "#ff4d5e"]),
+                  use_container_width=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(_player_card_html(target), unsafe_allow_html=True)
+        st.markdown(f"<div class='fut-facts'>{_facts_line(target)}</div>",
+                    unsafe_allow_html=True)
+    with c2:
+        st.markdown(_player_card_html(match), unsafe_allow_html=True)
+        st.markdown(f"<div class='fut-facts'>{_facts_line(match)}</div>",
+                    unsafe_allow_html=True)
+    st.markdown(
+        "<div class='ms-note' style='text-align:center'>🔵 הקו הכחול = השחקן שביקשת"
+        f" (<b>{target_name}</b>) · 🔴 הקו האדום = ההתאמה (<b>{match_name}</b>). "
+        "ככל שהצורות חופפות יותר — סגנון המשחק דומה יותר.</div>",
+        unsafe_allow_html=True)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Column legend (מקרא) — a short Hebrew explainer shown beneath every table
+# ---------------------------------------------------------------------------
+COL_LEGEND_HE = {
+    "short_name": "שם השחקן",
+    "long_name": "שם מלא",
+    "position_group": "עמדה (חלוץ/קשר/הגנה/שוער)",
+    "age": "גיל",
+    "overall": "דירוג כללי ב-FC24 (0–99)",
+    "potential": "פוטנציאל עתידי (0–99)",
+    "value_eur": "שווי שוק ביורו (€)",
+    "preferred_foot": "רגל חזקה (ימין/שמאל)",
+    "club_name": "מועדון",
+    "league_name": "ליגה",
+    "nationality_name": "נבחרת / לאום",
+    "matches": "מספר משחקים (מנתוני אירועים אמיתיים)",
+    "total_goals": "סך הגולים שהבקיע",
+    "goals_per_match": "ממוצע גולים למשחק",
+    "matches_with_2_plus_goals": "משחקי דאבל (2+ גולים באותו משחק)",
+    "attacking_involvement_score": "מעורבות התקפית (0–100, גבוה=מעורב יותר)",
+    "creative_score": "יצירתיות ובישולים (0–100)",
+    "discipline_score": "משמעת — מעט כרטיסים (0–100, גבוה=ממושמע)",
+    "foot_balance_score": "איזון דו-רגלי (0–100, גבוה=שולט בשתי הרגליים)",
+    "similarity": "מידת דמיון לשחקן המבוקש (0–1, כאשר 1=זהה לחלוטין)",
+    "reason": "הסבר הדמיון — התכונות שבהן השחקנים הכי קרובים",
+    "cluster_id": "מספר מזהה של קבוצת הסגנון",
+    "label": "שם סגנון המשחק שזוהה",
+    "size": "כמות השחקנים בקבוצה",
+    "market_efficiency_score": "יחס יכולת-למחיר (גבוה=מציאה משתלמת יותר)",
+    "anomaly_score": "ציון חריגות (נמוך=יוצא דופן יותר)",
+    "direction": "סוג החריגה (מבצע יתר / מתחת לציפיות)",
+    "conversion_rate": "אחוז המרת בעיטות לגולים",
+}
+_LEGEND_DYNAMIC = {"trait_": "תכונה דומיננטית", "player_": "שחקן לדוגמה"}
+
+
+def _col_label(c):
+    if c in COL_LEGEND_HE:
+        return COL_LEGEND_HE[c]
+    for pre, lab in _LEGEND_DYNAMIC.items():
+        if c.startswith(pre) and c[len(pre):].isdigit():
+            return f"{lab} #{c[len(pre):]}"
+    return None
+
+
+def render_column_legend(dfa):
+    """List, beneath a table, what each of its columns means — in plain Hebrew."""
+    items = [f"<code>{c}</code> {_col_label(c)}"
+             for c in dfa.columns if _col_label(c)]
+    if not items:
+        return
+    st.markdown("<div class='ms-legend'>📖 <b>מקרא עמודות:</b><br>"
+                + " &nbsp;·&nbsp; ".join(items) + "</div>",
+                unsafe_allow_html=True)
 
 
 # compact "about / sources / ethics" — collapsed, so the top stays clean
@@ -539,17 +657,23 @@ def render_artifact(art):
         return
     if name == "cluster_players":
         st.dataframe(dfa, use_container_width=True, hide_index=True)
+        render_column_legend(dfa)
         sc = art.get("scatter")
         if sc:
             st.pyplot(make_cluster_scatter(np.array(sc["xy"]), np.array(sc["cids"]),
                                            sc["label_map"]), use_container_width=True)
         _src_footer(src)
         return
+    # "find similar to X" -> overlay the target and the closest match (azure vs red)
+    # on one radar + show both cards, then the full ranked table below.
+    if name == "find_similar_players" and not art.get("disambig"):
+        render_similar_compare(art.get("target"), dfa)
     # a table: players list OR disambiguation candidates
     st.dataframe(dfa, use_container_width=True, hide_index=True)
     if art.get("disambig"):
         st.markdown("<span class='ms-note'>נמצאו כמה שחקנים בשם הזה — כתבו את "
                     "השם המלא של זה שמעניין אתכם.</span>", unsafe_allow_html=True)
+    render_column_legend(dfa)
     _src_footer(src, len(dfa))
 
 
@@ -611,7 +735,8 @@ if prompt := st.chat_input("כתבו לסוכן בשפה חופשית…"):
                 art = {"name": "cluster_players", "df": action["df"], "source": src}
         else:
             art = {"name": action["name"], "df": action["df"], "source": src,
-                   "disambig": ex.get("disambiguation", False)}
+                   "disambig": ex.get("disambiguation", False),
+                   "target": ex.get("target")}
 
     st.session_state.history.append(
         {"role": "assistant", "content": text, "artifact": art})
