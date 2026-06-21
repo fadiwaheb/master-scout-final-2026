@@ -746,12 +746,31 @@ for _i, m in enumerate(st.session_state.history):
         if m.get("artifact"):
             render_artifact(m["artifact"])
         if _i == _last_pidx:
-            _names = ["—"] + m["artifact"]["df"]["short_name"].astype(str).tolist()
-            _pick = st.selectbox(
-                "🔎 השוואת דמיון — בחרו שחקן מהרשימה והוא יושווה אוטומטית לדומה לו ביותר",
-                _names, key=f"pick_{_i}")
+            _art0 = m["artifact"]
+            _names = ["—"] + _art0["df"]["short_name"].astype(str).tolist()
+            # if this list came from a "find similar to X" query, keep X fixed and
+            # let the dropdown choose WHICH of the similar players to compare to X.
+            _is_sim = _art0["name"] == "find_similar_players" and _art0.get("target")
+            if _is_sim:
+                _label = (f"🔎 השוואה מול {_art0['target']} — בחרו מהרשימה את השחקן "
+                          f"להציג מולו")
+            else:
+                _label = ("🔎 השוואת דמיון — בחרו שחקן מהרשימה והוא יושווה אוטומטית "
+                          "לדומה לו ביותר")
+            _pick = st.selectbox(_label, _names, key=f"pick_{_i}")
             if _pick != "—":
-                render_pick_comparison(_pick)
+                if _is_sim:
+                    _picked_df = _art0["df"][
+                        _art0["df"]["short_name"].astype(str) == _pick
+                    ].reset_index(drop=True)
+                    _cmp_art = {"name": "find_similar_players",
+                                "target": _art0["target"],
+                                "target_row": _art0.get("target_row"),
+                                "source": _art0.get("source")}
+                    if not render_similar_compare(_cmp_art, _picked_df):
+                        render_pick_comparison(_pick)
+                else:
+                    render_pick_comparison(_pick)
 
 
 # ---------------------------------------------------------------------------
