@@ -570,6 +570,24 @@ def render_similar_compare(art, dfa):
     return True
 
 
+def render_pick_comparison(name):
+    """Picker action: for the chosen player, find their single closest match and
+    show the dynamic comparison (overlaid radar + both cards). Recomputed every
+    time the selection changes. Falls back to a single card if no comparison can
+    be built (e.g. a goalkeeper, or no candidates)."""
+    try:
+        res, extra = agent.route_query(
+            "similar_players", {"player_name": name, "top_n": 4}, df)
+        cmp_art = {"name": "find_similar_players", "target": name, "source": "primary"}
+        if render_similar_compare(cmp_art, res):
+            return
+    except Exception:
+        pass
+    row = get_full_row(name)
+    if row is not None:
+        render_player_card(row)
+
+
 # ---------------------------------------------------------------------------
 # Column legend (מקרא) — a short Hebrew explainer shown beneath every table
 # ---------------------------------------------------------------------------
@@ -729,11 +747,11 @@ for _i, m in enumerate(st.session_state.history):
             render_artifact(m["artifact"])
         if _i == _last_pidx:
             _names = ["—"] + m["artifact"]["df"]["short_name"].astype(str).tolist()
-            _pick = st.selectbox("🔎 כרטיס שחקן — בחרו שחקן מהרשימה", _names, key=f"pick_{_i}")
+            _pick = st.selectbox(
+                "🔎 השוואת דמיון — בחרו שחקן מהרשימה והוא יושווה אוטומטית לדומה לו ביותר",
+                _names, key=f"pick_{_i}")
             if _pick != "—":
-                _row = get_full_row(_pick)
-                if _row is not None:
-                    render_player_card(_row)
+                render_pick_comparison(_pick)
 
 
 # ---------------------------------------------------------------------------
