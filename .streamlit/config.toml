@@ -1,0 +1,8 @@
+# Master Scout — Academron dark glassmorphism theme (azure on near-black)
+[theme]
+base = "dark"
+primaryColor = "#10d0f0"
+backgroundColor = "#070b17"
+secondaryBackgroundColor = "#0f1830"
+textColor = "#f4f7fb"
+font = "sans serif"

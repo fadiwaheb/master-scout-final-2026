@@ -1,0 +1,26 @@
+# --- secrets (NEVER commit) ---
+.env
+openai_key.txt
+*.key
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+.ipynb_checkpoints/
+
+# --- heavy raw data (attach as a separate ZIP in the LMS submission) ---
+data/raw/
+
+# --- processed data: the app only needs the final table; skip the intermediates ---
+data/processed/*
+!data/processed/final_scouting_table.csv
+
+# --- os noise ---
+.DS_Store
+Thumbs.db
+
+# streamlit local secrets
+.streamlit/secrets.toml
