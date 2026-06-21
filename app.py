@@ -486,27 +486,52 @@ def _facts_line(p):
     return " · ".join(facts)
 
 
+# the 6 FUT-card stat abbreviations + OVR, explained in Hebrew (the card legend)
+_FUT_STAT_LEGEND = [
+    ("OVR", "דירוג כללי (0–99)"), ("PAC", "מהירות"), ("SHO", "בעיטות / גמר"),
+    ("PAS", "מסירות"), ("DRI", "כדרור"), ("DEF", "הגנה"), ("PHY", "פיזיות / חוזק"),
+]
+
+
+def render_card_legend():
+    """Explain the player card's stat abbreviations (PAC/SHO/…) in plain Hebrew."""
+    items = " &nbsp;·&nbsp; ".join(f"<code>{a}</code> {h}" for a, h in _FUT_STAT_LEGEND)
+    st.markdown(f"<div class='ms-legend'>📖 <b>מקרא הכרטיס:</b><br>{items}</div>",
+                unsafe_allow_html=True)
+
+
 def render_player_card(p):
-    """A single player: compact radar next to the FUT card, facts beneath."""
+    """A single player: compact radar next to the FUT card, facts + legend beneath."""
     c1, c2 = st.columns([1, 1])
     with c1:
         st.pyplot(make_radar([p]), use_container_width=True)
     with c2:
         st.markdown(_player_card_html(p), unsafe_allow_html=True)
     st.markdown(f"<div class='fut-facts'>{_facts_line(p)}</div>", unsafe_allow_html=True)
+    render_card_legend()
 
 
-def render_similar_compare(target_name, dfa):
+def _has_radar(p):
+    """True only if the player has all 6 numeric face attributes for the radar."""
+    return p is not None and all(pd.notna(_val(p, a)) for a in _RADAR_ATTRS)
+
+
+def render_similar_compare(art, dfa):
     """The 'find similar to X' hero view: the target player and the single closest
     match overlaid on ONE radar (azure vs red) + their two cards side by side.
-    Returns True if it rendered (both players resolvable in our data)."""
+    Works whether the target is in our table OR came from EA / the model (its 6
+    attributes are carried in art['target_row']). Returns True if it rendered."""
+    target_name = art.get("target")
     if not target_name or dfa is None or dfa.empty:
         return False
+    # target: prefer our table; otherwise rebuild it from the external attributes
     target = get_full_row(str(target_name))
+    if target is None and art.get("target_row"):
+        target = pd.Series(art["target_row"])
     match_name = str(dfa.iloc[0]["short_name"])
     match = get_full_row(match_name)
-    if target is None or match is None:
-        return False  # e.g. target came from EA/web and isn't in our table
+    if not _has_radar(target) or not _has_radar(match):
+        return False  # missing attributes — fall back to the table-only view
 
     sim = dfa.iloc[0].get("similarity")
     sim_txt = f" · דמיון {float(sim) * 100:.0f}%" if pd.notna(sim) else ""
@@ -514,6 +539,13 @@ def render_similar_compare(target_name, dfa):
         f"<div class='ms-cmp-title'>🔬 השוואה ויזואלית: <b>{target_name}</b> "
         f"מול ההתאמה הקרובה ביותר <b>{match_name}</b>{sim_txt}</div>",
         unsafe_allow_html=True)
+    # the target wasn't in our table — its 6 attributes came from an external source
+    if art.get("source") in ("ea", "web"):
+        whence = ("הדירוגים הרשמיים של EA Sports FC" if art["source"] == "ea"
+                  else "ידע המודל על השחקן")
+        st.markdown(f"<div class='ms-note' style='text-align:center'>ℹ️ <b>{target_name}</b> "
+                    f"אינו במאגרים שלנו — 6 התכונות שלו נשלפו מ{whence}.</div>",
+                    unsafe_allow_html=True)
 
     mid = st.columns([1, 2, 1])[1]
     with mid:
@@ -534,6 +566,7 @@ def render_similar_compare(target_name, dfa):
         f" (<b>{target_name}</b>) · 🔴 הקו האדום = ההתאמה (<b>{match_name}</b>). "
         "ככל שהצורות חופפות יותר — סגנון המשחק דומה יותר.</div>",
         unsafe_allow_html=True)
+    render_card_legend()
     return True
 
 
@@ -667,7 +700,7 @@ def render_artifact(art):
     # "find similar to X" -> overlay the target and the closest match (azure vs red)
     # on one radar + show both cards, then the full ranked table below.
     if name == "find_similar_players" and not art.get("disambig"):
-        render_similar_compare(art.get("target"), dfa)
+        render_similar_compare(art, dfa)
     # a table: players list OR disambiguation candidates
     st.dataframe(dfa, use_container_width=True, hide_index=True)
     if art.get("disambig"):
@@ -736,7 +769,8 @@ if prompt := st.chat_input("כתבו לסוכן בשפה חופשית…"):
         else:
             art = {"name": action["name"], "df": action["df"], "source": src,
                    "disambig": ex.get("disambiguation", False),
-                   "target": ex.get("target")}
+                   "target": ex.get("target"),
+                   "target_row": ex.get("target_row")}
 
     st.session_state.history.append(
         {"role": "assistant", "content": text, "artifact": art})

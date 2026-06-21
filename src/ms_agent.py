@@ -786,7 +786,9 @@ def run_tool(name: str, args: dict, df: pd.DataFrame):
             df, ext, top_n=int(args.get("top_n") or 5), position_group=pos)
         tgt, src = ext.get("short_name", nm), ext.get("_source", "web")
         where = "EA Sports FC official ratings" if src == "ea" else "the model"
-        return res, {"target": tgt, "source": src}, \
+        # carry the target's full attribute row so the UI can draw its radar/card
+        # even though it is NOT in our local table.
+        return res, {"target": tgt, "source": src, "target_row": _ext_card_row(ext)}, \
             (f"Target {tgt} is NOT in our data — used its attributes from {where}. "
              f"Closest in our data: " + ", ".join(res["short_name"].head(5).astype(str)))
 
