@@ -9,66 +9,109 @@ Run:  conda activate masterscout && python scripts/build_thresholds_doc.py
 Out:  docs/ספים_והחלטות_Master_Scout.docx
 """
 
+# ייבוא Path לעבודה עם נתיבי קבצים
 from pathlib import Path
+# ייבוא Document ליצירת מסמך Word
 from docx import Document
+# ייבוא יחידות עיצוב (גודל, צבע, אינצ'ים)
 from docx.shared import Pt, RGBColor, Inches
+# ייבוא קבוע יישור פסקה
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+# ייבוא qn לגישה לרכיבי XML של docx
 from docx.oxml.ns import qn
+# ייבוא OxmlElement ליצירת רכיבי XML (RTL)
 from docx.oxml import OxmlElement
 
+# שורש הפרויקט
 ROOT = Path(__file__).resolve().parent.parent
+# נתיב מסמך הפלט
 OUT = ROOT / "docs" / "ספים_והחלטות_Master_Scout.docx"
 
 
 # ---------- RTL helpers ----------
+# פונקציית עזר: הופכת פסקה לכיווניות ימין-לשמאל
 def _set_rtl(paragraph):
+    # מקבלים/יוצרים את מאפייני הפסקה
     pPr = paragraph._p.get_or_add_pPr()
+    # יוצרים רכיב bidi
     bidi = OxmlElement("w:bidi")
+    # מציבים את ערכו ל-1 (RTL פעיל)
     bidi.set(qn("w:val"), "1")
+    # מוסיפים אותו לפסקה
     pPr.append(bidi)
+    # מיישרים את הפסקה לימין
     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
 
+# פונקציית עזר: הופכת טבלה שלמה ל-RTL
 def _rtl_table(table):
+    # מאפייני הטבלה
     tblPr = table._tbl.tblPr
+    # רכיב bidi חזותי לטבלה
     bidi = OxmlElement("w:bidiVisual")
+    # מוסיפים אותו
     tblPr.append(bidi)
+    # עוברים על כל שורה
     for row in table.rows:
+        # ועל כל תא
         for cell in row.cells:
+            # ועל כל פסקה בתא — מגדירים RTL
             for p in cell.paragraphs:
                 _set_rtl(p)
 
 
+# פונקציית עזר: מוסיפה כותרת RTL ברמה נתונה
 def h(doc, text, level=1):
+    # מוסיפים כותרת
     p = doc.add_heading(text, level=level)
+    # הופכים אותה ל-RTL
     _set_rtl(p)
+    # מחזירים את הפסקה
     return p
 
 
+# פונקציית עזר: מוסיפה פסקת טקסט RTL
 def para(doc, text, bold=False, size=11):
+    # מוסיפים פסקה
     p = doc.add_paragraph()
+    # מוסיפים את הטקסט כריצה
     run = p.add_run(text)
+    # מדגישים אם התבקש
     run.bold = bold
+    # מגדירים גודל גופן
     run.font.size = Pt(size)
+    # הופכים ל-RTL
     _set_rtl(p)
+    # מחזירים את הפסקה
     return p
 
 
+# פונקציית עזר: מוסיפה פריט רשימה (תבליט) RTL
 def bullet(doc, text):
+    # מוסיפים פסקה בסגנון רשימת תבליטים
     p = doc.add_paragraph(style="List Bullet")
+    # מוסיפים את הטקסט
     p.add_run(text)
+    # הופכים ל-RTL
     _set_rtl(p)
+    # מחזירים את הפסקה
     return p
 
 
+# פונקציית עזר: מטמיעה תמונה (אם קיימת) במרכז, עם כיתוב אופציונלי
 def image(doc, path, width_in=5.8, caption=None):
     """Embed an image (if it exists), centered, with an optional caption."""
+    # ממירים לנתיב
     path = Path(path)
+    # אם הקובץ לא קיים — לא מטמיעים
     if not path.exists():
         return
+    # מוסיפים פסקה ממורכזת
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # מטמיעים את התמונה ברוחב נתון
     p.add_run().add_picture(str(path), width=Inches(width_in))
+    # אם יש כיתוב — מוסיפים אותו ממורכז ונטוי
     if caption:
         cap = doc.add_paragraph()
         cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -77,36 +120,51 @@ def image(doc, path, width_in=5.8, caption=None):
         run.font.size = Pt(9)
 
 
+# פונקציית עזר: מוסיפה טבלה עם כותרות מודגשות, RTL
 def table(doc, headers, rows):
+    # יוצרים טבלה עם שורת כותרת
     t = doc.add_table(rows=1, cols=len(headers))
+    # מגדירים סגנון טבלה
     t.style = "Light Grid Accent 1"
+    # ממלאים את כותרות העמודות (מודגשות)
     for i, htext in enumerate(headers):
         cell = t.rows[0].cells[i]
         cell.paragraphs[0].add_run(htext).bold = True
+    # ממלאים את שורות הנתונים
     for r in rows:
         cells = t.add_row().cells
         for i, val in enumerate(r):
             cells[i].paragraphs[0].add_run(str(val))
+    # הופכים את הטבלה ל-RTL
     _rtl_table(t)
+    # מחזירים אותה
     return t
 
 
 # ====================================================================
+# בונה את מסמך הספים וההחלטות המלא
 def build():
+    # יוצרים מסמך חדש
     doc = Document()
     # default font
+    # גופן ברירת מחדל
     doc.styles["Normal"].font.name = "Arial"
     doc.styles["Normal"].font.size = Pt(11)
 
+    # כותרת ראשית
     title = doc.add_heading("מסמך ספים והחלטות — פרויקט Master Scout", level=0)
+    # RTL לכותרת
     _set_rtl(title)
+    # כותרת משנה ותיאור המסמך
     para(doc, "סוכן סקאוטינג שחקני כדורגל · סדנת AI & ML · קורס 277302",
          bold=True)
+    # פסקת פתיחה המסבירה את מטרת המסמך
     para(doc, "המסמך מרכז את כל הספים, המשקלים והסיפים שנקבעו בפרויקט — הערך שנבחר "
               "וההנמקה מאחוריו. כל סף מתועד גם כהערה בקוד עצמו. שמות שחקנים/קבוצות "
               "באנגלית; ההסברים בעברית. זהו מסמך חי — מתעדכן בכל שלב שמוסיף סף.")
 
     # ---------------- Stage 1 ----------------
+    # שלב 1 — מבנה הנתונים ומיפוי הקודים
     h(doc, "שלב 1 — מבנה הנתונים ומיפוי קודים", 1)
     para(doc, "אין ספים מספריים. נבחרו עמודות רלוונטיות מכל קובץ ונבנתה טבלת מיפוי "
               "לקודי האירועים (event_type, location, bodypart וכו'). פירוט מלא: "
@@ -117,6 +175,7 @@ def build():
                 "המצב הנוכחי בלבד (18,350 שחקנים ב-FC24).")
 
     # ---------------- Stage 3 ----------------
+    # שלב 3 — ניקוי השחקנים והציונים המחושבים
     h(doc, "שלב 3 — ניקוי שחקנים וציונים מחושבים (clean_players)", 1)
 
     h(doc, "3.1 — קיבוץ עמדות (position_group)", 2)
@@ -166,6 +225,7 @@ def build():
                 "(פרק 9 במחוון).")
 
     # ---------------- Stage 4 ----------------
+    # שלב 4 — ניקוי האירועים ומיפוי הקודים
     h(doc, "שלב 4 — ניקוי אירועים ומיפוי קודים (clean_events)", 1)
     para(doc, "כל קודי האירועים תורגמו לעמודות טקסט (event_type_name, bodypart_name "
               "וכו') ונבנו עמודות בינאריות לכל מאפיין רלוונטי. המיפוי המלא: "
@@ -199,6 +259,7 @@ def build():
                 "clean_name שלהם NaN ולכן יסוננו באגרגציה לשחקן.")
 
     # ---------------- Stage 6 ----------------
+    # שלב 6 — אגרגציה לשחקן וציוני הביצוע
     h(doc, "שלב 6 — אגרגציה לשחקן וציוני ביצוע (player_event_stats)", 1)
     para(doc, "שורה אחת לכל שחקן עם סכומים, ערכים per_match, יחסים (0–1) וארבעה "
               "ציונים מחושבים. כאן נדרשים ספי מהימנות כדי למנוע רעש ממדגם קטן.")
@@ -246,6 +307,7 @@ def build():
               "מחושב כ-min(left,right)/max(left,right)×100, בכפוף ל-MIN_FOOT_SHOTS.")
 
     # ---------------- Stage 7 ----------------
+    # שלב 7 — בניית הטבלה המרכזית (המיזוג)
     h(doc, "שלב 7 — הטבלה המרכזית (final_scouting_table)", 1)
     para(doc, "מיזוג פרופיל FC24 (clean_players) עם מדדי הביצוע (player_event_stats) "
               "לטבלה אחת שעליה רץ כל הסוכן.")
@@ -268,6 +330,7 @@ def build():
                 "המיזוג עלול לשייך להם אותם נתוני אירועים. מתועד.")
 
     # ---------------- Stage 8 ----------------
+    # שלב 8 — פונקציות החיפוש הפרמטריות
     h(doc, "שלב 8 — פונקציות חיפוש (search.py)", 1)
     para(doc, "עקרון מנחה: כל סף הוא פרמטר עם ערך ברירת מחדל, כך שקל לשנותו. "
               "חיפושי פרופיל רצים על כל 18,350 השחקנים; חיפושי ביצוע "
@@ -288,6 +351,7 @@ def build():
               "חיפוש ברייסים מחזיר את Lewandowski (35 משחקי 2+ גולים).")
 
     # ---------------- Stage 9 ----------------
+    # שלב 9 — דמיון שחקנים ב-Cosine (שימוש #1)
     h(doc, "שלב 9 — דמיון שחקנים ב-Cosine (similarity.py) — שימוש #1", 1)
     para(doc, "מציאת שחקנים דומים: נרמול פיצ'רים + Cosine. זהו האנלוג המספרי של "
               "TF-IDF+Cosine מהקורס — במקום משקלי TF-IDF, וקטור תכונות מנורמל.")
@@ -312,6 +376,7 @@ def build():
               "ממקדת בתפקיד — בדרך כלל שימושית יותר לסקאוטינג.")
 
     # ---------------- Stage 10 ----------------
+    # שלב 10 — קיבוץ סגנונות משחק ב-K-Means (שימוש #1)
     h(doc, "שלב 10 — קיבוץ סגנונות משחק ב-K-Means (clustering.py) — שימוש #1", 1)
     para(doc, "קיבוץ שחקנים לסגנונות לפי אותן 14 תכונות FC24 (StandardScaler). "
               "רץ על שחקני שדה עם תכונות מלאות (16,305); שוערים מקבלים cluster_id=-1.")
@@ -339,6 +404,7 @@ def build():
           caption="הקלאסטרים בהיטל PCA דו-ממדי (צבע = סגנון משחק)")
 
     # ---------------- Stage 11 ----------------
+    # שלב 11 — גילוי חריגות ומציאות (שימוש #2)
     h(doc, "שלב 11 — גילוי חריגות (anomaly.py) — שימוש #2", 1)
     para(doc, "שני שימושים: (א) איתור מציאות (יכולת גבוהה במחיר נמוך); (ב) חריגות "
               "פרופיל-מול-ביצוע (דירוג FC24 לא תואם תפוקה אמיתית). אלגוריתמים מוכנים "
@@ -367,11 +433,15 @@ def build():
               "הנקודות שכל השלושה הסכימו עליהן הן החריגות הכי יציבות.")
 
     # ---------------- placeholder for future ----------------
+    # מקטע שמור לשלבים הבאים שיתווספו עם ההתקדמות
     h(doc, "שלבים הבאים (יתווספו עם ההתקדמות)", 1)
+    # תיאור השלבים הבאים
     para(doc, "שלב 12 (סוכן GPT — ספי סקופ/בהירות), שלב 13 (NLG), שלב 14 (בדיקות "
               "כולל מקרה כשל), שלב 15 (פריסה). יתועדו כאן.")
 
+    # שומרים את המסמך לקובץ
     doc.save(OUT)
+    # מדפיסים את נתיב הקובץ שנשמר
     print(f"Saved: {OUT}")
 
 
