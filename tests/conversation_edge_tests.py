@@ -7,34 +7,51 @@ free-text football vocabulary, context retention, English, and the known hard ca
 
 Run:  .../envs/masterscout/bin/python tests/conversation_edge_tests.py
 """
+# מאפשר תחביר טיפוסים מודרני
 from __future__ import annotations
+# ייבוא sys להוספת src לנתיב
 import sys
+# ייבוא Path לעבודה עם נתיבי קבצים
 from pathlib import Path
 
+# שורש הפרויקט
 ROOT = Path(__file__).resolve().parent.parent
+# מוסיפים את src לנתיב הייבוא
 sys.path.insert(0, str(ROOT / "src"))
+# מייבאים את שכבת הסוכן
 import ms_agent as agent  # noqa: E402
 
+# טוענים את הטבלה המרכזית פעם אחת
 DF = agent.load_table()
 
 
+# פונקציית עזר: מריצה דו-שיח (שרשור LLM חדש) ומחזירה את אירועי כל תור
 def run(turns):
     """Play a dialogue; return events [{user, text, tool}] (fresh LLM thread)."""
+    # היסטוריית הודעות ורשימת אירועים
     msgs, events = [], []
+    # עוברים על כל תור משתמש
     for u in turns:
+        # מוסיפים את הודעת המשתמש
         msgs.append({"role": "user", "content": u})
+        # מריצים תור שיחה
         text, action = agent.converse(msgs, DF)
+        # שומרים את הקלט, הטקסט, שם הכלי ומספר השורות
         events.append({"user": u, "text": (text or "").replace("\n", " "),
                        "tool": action["name"] if action else None,
                        "rows": len(action["df"]) if action else None})
+    # מחזירים את האירועים
     return events
 
 
+# פונקציית עזר: מחזירה את רשימת הכלים שרצו בפועל בדו-שיח
 def tools_fired(ev):
+    # מסננים את האירועים שבהם רץ כלי
     return [e["tool"] for e in ev if e["tool"]]
 
 
 # (id, title, turns, checker(events)->(ok, note))
+# רשימת תרחישי קצה: (מזהה, כותרת, תורות השיחה, פונקציית בדיקה)
 SCENARIOS = [
     ("E1", "ברכה פשוטה", ["היי מה קורה"],
      lambda ev: (ev[-1]["tool"] is None, "ענה בלי להריץ כלי")),
@@ -80,36 +97,57 @@ SCENARIOS = [
 ]
 
 
+# בלוק שמורץ בהרצה ישירה — מריץ את כל תרחישי הקצה ומדפיס סיכום
 def main():
+    # כותרת
     print("=" * 78)
     print("STRICT CONVERSATIONAL EDGE-CASE TESTS")
     print(f"model: {agent.MODEL}")
     print("=" * 78)
+    # רשימת תוצאות
     results = []
+    # עוברים על כל תרחיש
     for sid, title, turns, check in SCENARIOS:
+        # מנסים להריץ את הדו-שיח ולבדוק
         try:
+            # מריצים את השיחה
             ev = run(turns)
+            # מריצים את פונקציית הבדיקה
             ok, note = check(ev)
+            # קובעים פסק
             verdict = "PASS" if ok else "CHECK"
         except Exception as e:
+            # שגיאה — מסמנים ERROR
             ev, verdict, note = [], "ERROR", f"exception: {e}"
+        # שומרים את התוצאה
         results.append((sid, verdict, title, note))
+        # מדפיסים כותרת תרחיש
         print(f"\n[{sid}] {verdict:5s} {title}")
+        # מדפיסים כל תור בדו-שיח
         for e in ev:
+            # תיאור הכלי שרץ (אם רץ)
             t = f" -> 🛠️ {e['tool']}({e['rows']} rows)" if e["tool"] else ""
+            # שורת המשתמש
             print(f"   👤 {e['user']}")
+            # שורת התשובה (חתוכה ל-120 תווים)
             print(f"   🤖 {e['text'][:120]}{t}")
+        # מדפיסים את ההערה
         print(f"   ↳ {note}")
 
+    # סיכום צ'ק-ליסט
     print("\n" + "=" * 78)
     print("CHECKLIST SUMMARY")
     print("=" * 78)
+    # סופרים כמה עברו
     npass = sum(1 for _, v, _, _ in results if v == "PASS")
+    # מדפיסים כל תוצאה עם סימן
     for sid, v, title, note in results:
         mark = {"PASS": "✅", "CHECK": "⚠️", "ERROR": "❌"}[v]
         print(f"{mark} {sid:4s} {title:34s} | {note}")
+    # סיכום סופי
     print(f"\n{npass}/{len(results)} PASS")
 
 
+# נקודת כניסה
 if __name__ == "__main__":
     main()

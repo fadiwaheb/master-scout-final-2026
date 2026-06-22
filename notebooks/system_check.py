@@ -32,25 +32,39 @@
 
 # %%
 # --- הגדרות וסביבה ---
+# ייבוא sys להוספת src לנתיב
 import sys
+# ייבוא Path לעבודה עם נתיבי קבצים
 from pathlib import Path
 
+# ייבוא numpy לחישובים מספריים
 import numpy as np
+# ייבוא pandas לעבודה עם הטבלאות
 import pandas as pd
+# ייבוא matplotlib לציור גרפים
 import matplotlib.pyplot as plt
+# ייבוא seaborn לגרפים יפים יותר
 import seaborn as sns
 
 # שורש הפרויקט = תיקיית האב של notebooks/
 ROOT = Path.cwd().parent if Path.cwd().name == "notebooks" else Path.cwd()
+# מוסיפים את src לנתיב הייבוא
 sys.path.insert(0, str(ROOT / "src"))
 
+# מגדירים תצוגה רחבה של עמודות
 pd.set_option("display.max_columns", 60)
+# מגדירים רוחב תצוגה
 pd.set_option("display.width", 200)
+# ערכת עיצוב לגרפים
 sns.set_theme(style="whitegrid")
 
+# תיקיית הנתונים הגולמיים
 RAW = ROOT / "data" / "raw"
+# תיקיית הנתונים המעובדים
 PROC = ROOT / "data" / "processed"
+# מדפיסים את שורש הפרויקט
 print("project root:", ROOT)
+# מדפיסים את רשימת קבצי ה-CSV המעובדים
 print("processed files:", [p.name for p in PROC.glob("*.csv")])
 
 # %% [markdown]

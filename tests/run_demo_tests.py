@@ -16,20 +16,29 @@ Scenario kinds:
 Run:  /Users/ronbiton/opt/anaconda3/envs/masterscout/bin/python tests/run_demo_tests.py
 """
 
+# מאפשר תחביר טיפוסים מודרני
 from __future__ import annotations
 
+# ייבוא sys להוספת src לנתיב
 import sys
+# ייבוא Path לעבודה עם נתיבי קבצים
 from pathlib import Path
 
+# שורש הפרויקט
 ROOT = Path(__file__).resolve().parent.parent
+# מוסיפים את src לנתיב הייבוא
 sys.path.insert(0, str(ROOT / "src"))
 
+# מייבאים את שכבת הסוכן
 import ms_agent as agent      # noqa: E402
+# מייבאים את שכבת הדוחות
 import report     # noqa: E402
 
+# נתיב קובץ תוצאות הבדיקות (Markdown)
 OUT_MD = ROOT / "reports" / "14_test_results.md"
 
 
+# רשימת תרחישי הבדיקה: תקינים, סירוב, הבהרה, לא-נמצא, וכשלים מתועדים
 SCENARIOS = [
     # ---- valid cases (the agent should handle these well) ----
     {
@@ -106,55 +115,85 @@ SCENARIOS = [
 ]
 
 
+# פונקציה: מריצה תרחיש בודד דרך הסוכן ומחזירה (פלט, תשובה, פסק-דין)
 def _run_one(sc, df):
+    # מריצים את השאילתה דרך הסוכן
     out = agent.run_agent(sc["query"], df)
     # build the user-facing answer (report for ok, else the status message)
+    # התשובה למשתמש: דוח אם הצליח, אחרת הודעת הסטטוס
     answer = report.generate_report(out) if out["status"] == "ok" else out["message"]
 
     # decide PASS/observed for the summary
+    # קובעים פסק-דין לפי סוג התרחיש
     if sc["kind"] == "valid":
+        # תקין: עבר אם הסטטוס ok והכוונה צפויה
         ok = out["status"] == "ok" and out["intent"] in sc["expect_intent"]
         verdict = "PASS" if ok else "CHECK"
     elif sc["kind"] == "refusal":
+        # סירוב: עבר אם הסטטוס מחוץ-לתחום
         verdict = "PASS" if out["status"] == "out_of_scope" else "CHECK"
     elif sc["kind"] == "clarify":
+        # הבהרה: עבר אם הסטטוס clarify
         verdict = "PASS" if out["status"] == "clarify" else "CHECK"
     elif sc["kind"] == "not_found":
+        # לא-נמצא: עבר אם הסטטוס not_found
         verdict = "PASS" if out["status"] == "not_found" else "CHECK"
     else:  # failure — documented on purpose; there is no "pass"
+        # כשל מתועד — אין "מעבר", זו מגבלה מכוונת
         verdict = "DOCUMENTED FAILURE"
+    # מחזירים את הפלט, התשובה והפסק
     return out, answer, verdict
 
 
+# בלוק שמורץ בהרצה ישירה — מריץ את כל התרחישים וכותב קובץ ראיות
 def main():
+    # טוענים את הטבלה
     df = agent.load_table()
+    # שורות הפתיחה של קובץ ה-Markdown
     lines = ["# Stage 14 — Test results & demo cases\n",
              f"_Classifier model: `{agent.MODEL}` · Report model: `{report.REPORT_MODEL}`_\n",
              "Each case runs the full pipeline: free text -> agent (intent+filters) "
              "-> backend function -> natural-language report.\n"]
 
+    # קו מפריד בקונסולה
     print("=" * 72)
+    # עוברים על כל תרחיש
     for sc in SCENARIOS:
+        # מריצים אותו
         out, answer, verdict = _run_one(sc, df)
         # console
+        # מדפיסים את הפסק לקונסולה
         print(f"[{sc['id']}] {verdict:18s} {sc['title']}")
+        # מדפיסים את השאילתה
         print(f"     Q: {sc['query']}")
+        # מדפיסים את הסטטוס והכוונה
         print(f"     -> status={out['status']} intent={out['intent']}")
         # markdown
+        # מוסיפים כותרת תרחיש ל-Markdown
         lines.append(f"\n## {sc['id']} · {sc['title']}  — **{verdict}**\n")
+        # השאילתה
         lines.append(f"- **Query:** {sc['query']}")
+        # הכוונה שסווגה והסטטוס
         lines.append(f"- **Classified intent:** `{out['intent']}` (status: `{out['status']}`)")
+        # אם תקין — מוסיפים את הכוונה הצפויה
         if sc["kind"] == "valid":
             lines.append(f"- **Expected intent:** {' / '.join(sc['expect_intent'])}")
+        # תשובת הסוכן (בפורמט ציטוט)
         lines.append(f"- **Agent answer:**\n\n  > {answer.strip().replace(chr(10), chr(10)+'  > ')}\n")
+        # אם זה כשל — מוסיפים את ההסבר מדוע (לפרק 7)
         if sc["kind"] == "failure":
             lines.append(f"- **Why it fails (for ch.7):** {sc['why']}\n")
+    # קו מפריד
     print("=" * 72)
 
+    # יוצרים את תיקיית הפלט אם אינה קיימת
     OUT_MD.parent.mkdir(parents=True, exist_ok=True)
+    # כותבים את קובץ הראיות
     OUT_MD.write_text("\n".join(lines), encoding="utf-8")
+    # מדפיסים היכן נכתב
     print(f"\nEvidence written to: {OUT_MD.relative_to(ROOT)}")
 
 
+# נקודת כניסה
 if __name__ == "__main__":
     main()
