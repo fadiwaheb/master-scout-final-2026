@@ -24,3 +24,12 @@ Thumbs.db
 
 # streamlit local secrets
 .streamlit/secrets.toml
+
+# --- local-only working notes / dev log (kept off GitHub on purpose) ---
+DEV_LOG.md
+notes_local/
+Master_Scout_Presentation_Prep.docx
+# personal explanation docs (Hebrew, kept local) + Word lock/temp files
+הסבר מורחב על טבלאות של פרויקט סקואטינג כדורגל פאדי 2026.docx
+~$*.docx
+*.tmp

@@ -114,6 +114,13 @@ def find_similar_players(df, player_name, top_n=10, same_position=True,
     if target is None:
         raise ValueError(f"player not found: {player_name!r}")
 
+    # goalkeepers lack the 6 outfield play-style attributes, so a play-style
+    # vector for them is empty — Cosine similarity can't be computed. Signal it
+    # clearly (callers turn this into a friendly "outfield players only" notice)
+    # instead of returning meaningless NaN matches.
+    if str(target["position_group"]) == "GK":
+        raise ValueError("goalkeeper play-style analysis not supported")
+
     # candidate pool: outfield players with complete features
     pool = df[df["position_group"] != "GK"].dropna(subset=SIM_FEATURES).copy()
     if same_position:

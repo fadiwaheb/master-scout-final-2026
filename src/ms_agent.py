@@ -51,6 +51,83 @@ CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini")
 
 DEFAULT_TOP_N = 4  # lecturer: an agent returns 3-4 results, not a wikipedia dump
 
+
+class GoalkeeperAnalysisUnavailable(Exception):
+    """Raised when the user enters a goalkeeper's name. Goalkeepers have no outfield
+    attributes in our data, so play-style analysis (similarity/clustering) can't run
+    yet. We answer with the goalkeeper's BASIC details only (name, age, overall,
+    potential) plus a notice that fuller analysis is coming in a future update —
+    instead of a broken/empty statistical result. The basic facts are carried in
+    `.facts` so the notice can show them."""
+
+    def __init__(self, facts: dict | None = None):
+        super().__init__("goalkeeper analysis unavailable")
+        self.facts = facts or {}
+
+
+def _basic_facts(row) -> dict:
+    """Pull only the BASIC profile fields (name/age/overall/potential) from a player
+    row — works for a pandas Series (our data) or a dict (external lookup)."""
+    def g(k):
+        v = row.get(k) if hasattr(row, "get") else None
+        return v if (v is not None and pd.notna(v)) else None
+
+    def as_int(k):
+        v = g(k)
+        return int(v) if v is not None else None
+
+    sn = g("short_name") or g("long_name")
+    return {"short_name": str(sn) if sn is not None else None,
+            "age": as_int("age"), "overall": as_int("overall"),
+            "potential": as_int("potential")}
+
+
+def _gk_notice(language: str = "he", facts: dict | None = None) -> str:
+    """The fixed, honest goalkeeper notice: BASIC details (name/age/overall/potential)
+    — and nothing more — followed by the 'analysis coming in a future update' line."""
+    facts = facts or {}
+    if language == "he":
+        head = ""
+        if facts.get("short_name"):
+            det = []
+            if facts.get("age") is not None:
+                det.append(f"גיל {facts['age']}")
+            if facts.get("overall") is not None:
+                det.append(f"דירוג כללי {facts['overall']}")
+            if facts.get("potential") is not None:
+                det.append(f"פוטנציאל {facts['potential']}")
+            line = f"🧤 **{facts['short_name']}** — שוער"
+            if det:
+                line += " · " + " · ".join(det)
+            head = line + "\n\n"
+        return head + (
+            "כרגע אני יכול להציג עבור שוערים את הפרטים הבסיסיים בלבד (שם, גיל, דירוג, "
+            "פוטנציאל). הניתוחים הסטטיסטיים (דמיון סגנון משחק וקיבוץ) מתבצעים על "
+            "**שחקני שדה בלבד**, כי לשוערים אין במאגר את 6 תכונות הליבה — זו מגבלת "
+            "דאטא ידועה. **בגרסת עדכון עתידית של המערכת יתווסף ניתוח סטטיסטי מלא גם "
+            "לשוערים.**"
+        )
+    head = ""
+    if facts.get("short_name"):
+        det = []
+        if facts.get("age") is not None:
+            det.append(f"age {facts['age']}")
+        if facts.get("overall") is not None:
+            det.append(f"overall {facts['overall']}")
+        if facts.get("potential") is not None:
+            det.append(f"potential {facts['potential']}")
+        line = f"🧤 **{facts['short_name']}** — goalkeeper"
+        if det:
+            line += " · " + " · ".join(det)
+        head = line + "\n\n"
+    return head + (
+        "For goalkeepers I can currently show only the basic details (name, age, "
+        "overall, potential). Statistical analyses (play-style similarity and "
+        "clustering) run on **outfield players only**, because goalkeepers don't "
+        "have the 6 core attributes in our data — a known data limitation. **A future "
+        "system update will add full statistical analysis for goalkeepers too.**"
+    )
+
 # intents the agent can route to (name -> short human description, for docs/tests)
 INTENTS = {
     "profile_search": "filter by FC24 profile (position, age, overall, pace, value, foot, league, nationality)",
@@ -548,26 +625,40 @@ HOW TO CONVERSE:
 - POSITIONS: the ONLY positions that exist are Forward, Midfielder, Defender,
   Goalkeeper. NEVER ask for finer roles (center-back vs full-back, winger, striker,
   בלם/מגן) — we don't have that data.
-- CONFIRM BEFORE ACTING (exactly once): when you have ~2+ criteria, restate in ONE
-  clear line what you're about to do (e.g. "אחפש חלוצים בגילאי 25-30 עד 40 מיליון
-  יורו, ממוין לפי דירוג") and ask to confirm or edit ("לבצע? או לשנות משהו?").
-  This single confirmation question is separate from gathering criteria — ask it
-  only ONCE. The MOMENT the user agrees ("כן" / "בצע" / "חפש" / "go" / "sure" /
-  "תריץ") you MUST call the matching tool immediately — do NOT ask again. If the
-  user asks to change something, adjust and re-confirm once. If the user includes a
-  go-word ("בצע"/"כן"/"חפש"/"go") TOGETHER with their last detail, treat it as the
-  confirmation and call the tool right away — do NOT add another confirmation step.
+- CONFIRM BEFORE ACTING (exactly once): once you have enough to act (about 2-3
+  criteria, and ALWAYS within 3-4 questions total), STOP asking and confirm. In ONE
+  clear line: (a) restate what you're about to do (e.g. "אחפש חלוצים בגילאי 25-30 עד
+  40 מיליון יורו, ממוין לפי דירוג"), then (b) ask whether to run it as-is OR add more
+  detail, AND give 2-4 concrete EXAMPLES of optional criteria the user could still
+  add. Tailor the examples to the request and to what's still missing — e.g. for a
+  player search: "רוצה שאריץ ככה, או להוסיף עוד קריטריון? אפשר למשל מהירות מינימלית,
+  רגל חזקה, ליגה/נבחרת, או ביצועים אמיתיים כמו מינימום גולים/בישולים." (In English:
+  "Want me to run it like this, or add a filter? e.g. minimum pace, preferred foot,
+  league/nationality, or real stats like minimum goals/assists.") Pick examples that
+  FIT the intent (for similar-players: same position only / max age / max budget; for
+  bargains: position / minimum rating / max age). Ask this confirmation only ONCE.
+  The MOMENT the user agrees ("כן" / "בצע" / "חפש" / "go" / "sure" / "תריץ" / "כמו
+  שזה") you MUST call the matching tool immediately — do NOT ask again. If the user
+  adds a criterion instead, fold it in and re-confirm once (with examples again only
+  if helpful). If the user includes a go-word ("בצע"/"כן"/"חפש"/"go") TOGETHER with
+  their last detail, treat it as the confirmation and call the tool right away.
 - After a tool runs you'll get its result; summarize it briefly and offer a natural
   next step (e.g. "רוצה לצמצם לפי תקציב? או לראות שחקן דומה?").
-- BE EFFICIENT: reach an actionable result within about 3-4 of your questions —
-  don't over-interrogate. After ~2 criteria, go to the confirmation step.
+- BE EFFICIENT: never ask more than 3-4 questions before reaching the confirmation
+  step. By your 3rd-4th question you should already have enough to act — confirm and
+  offer optional extra filters rather than interrogating further.
 
 CLUSTERING: NEVER ask the user how many groups (K) to use — the system always picks
 the OPTIMAL number automatically (you may mention "אבחר את החלוקה האופטימלית"). You
 MAY ask which position to focus on, or whether to use all players.
 
 GOALKEEPERS: goalkeepers have no outfield play-style attributes in our data, so
-clustering and play-style similarity DON'T apply to them — say so if asked.
+STATISTICAL analyses (play-style similarity, clustering) DON'T apply to them yet.
+For ANY request about a goalkeeper (profile lookup OR similar players), still call
+the matching tool with that name — the system automatically returns the goalkeeper's
+BASIC details only (name, age, overall, potential) plus a clear notice that fuller
+statistical analysis will be added in a future update. Just relay that; never invent
+goalkeeper play-style stats or similar-player lists.
 
 DISAMBIGUATION: if a name matches several different players, the tool returns a short
 list; present it and ask the user which specific player they mean.
@@ -751,6 +842,9 @@ def run_tool(name: str, args: dict, df: pd.DataFrame):
         nm = args.get("player_name", "")
         matches = similarity.find_player_matches(df, nm)
         if len(matches) == 1:                                   # one clear player
+            # goalkeeper -> show only basic details + the "coming soon" notice
+            if str(matches.iloc[0]["position_group"]) == "GK":
+                raise GoalkeeperAnalysisUnavailable(_basic_facts(matches.iloc[0]))
             res = matches.iloc[[0]].reset_index(drop=True)
             return res, {"card": True, "source": "primary"}, _summarize_result(name, res, {})
         if len(matches) > 1:                                    # disambiguate
@@ -764,6 +858,8 @@ def run_tool(name: str, args: dict, df: pd.DataFrame):
         ext = external_lookup(nm)                               # EA API, then model
         if ext is None:
             raise ValueError(f"player not found anywhere: {nm}")
+        if str(ext.get("position_group")) == "GK":              # external goalkeeper
+            raise GoalkeeperAnalysisUnavailable(_basic_facts(ext))
         src = ext.get("_source", "web")
         res = pd.DataFrame([_ext_card_row(ext)])
         where = ("EA Sports FC official ratings" if src == "ea"
@@ -774,13 +870,19 @@ def run_tool(name: str, args: dict, df: pd.DataFrame):
 
     if name == "find_similar_players":
         nm = args.get("player_name", "")
-        if similarity._find_player_row(df, nm) is not None:
+        row = similarity._find_player_row(df, nm)
+        if row is not None:
+            # goalkeeper in our data -> basic details only + "coming soon" notice
+            if str(row["position_group"]) == "GK":
+                raise GoalkeeperAnalysisUnavailable(_basic_facts(row))
             res, extra = route_query("similar_players", _tool_filters(args), df)
             extra["source"] = "primary"
             return res, extra, _summarize_result(name, res, extra)
         ext = external_lookup(nm)                               # target not in data
         if ext is None:
             raise ValueError(f"player not found anywhere: {nm}")
+        if str(ext.get("position_group")) == "GK":              # external GK target
+            raise GoalkeeperAnalysisUnavailable(_basic_facts(ext))
         pos = ext.get("position_group") if args.get("same_position") else None
         res = similarity.find_similar_to_attrs(
             df, ext, top_n=int(args.get("top_n") or 5), position_group=pos)
@@ -801,6 +903,15 @@ def run_tool(name: str, args: dict, df: pd.DataFrame):
 def _tc_to_dict(tc):
     return {"id": tc.id, "type": "function",
             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+
+
+def _user_language(messages: list) -> str:
+    """Guess the user's language ('he'/'en') from the latest user message —
+    if it contains any Hebrew letter we answer in Hebrew, otherwise English."""
+    for m in reversed(messages):
+        if m.get("role") == "user" and m.get("content"):
+            return "he" if any("֐" <= ch <= "׿" for ch in m["content"]) else "en"
+    return "he"
 
 
 def converse(messages: list, df: pd.DataFrame | None = None):
@@ -833,6 +944,16 @@ def converse(messages: list, df: pd.DataFrame | None = None):
     try:
         res, extra, summary = run_tool(name, args, df)
         action = {"name": name, "df": res, "extra": extra}
+    except GoalkeeperAnalysisUnavailable as gk_exc:
+        # deliver the goalkeeper notice (basic details + the "coming soon" line)
+        # VERBATIM in the user's language and skip the second LLM call, so the exact
+        # wording always reaches the user.
+        notice = _gk_notice(_user_language(messages), gk_exc.facts)
+        messages.append({"role": "tool", "tool_call_id": tc.id,
+                         "content": "Goalkeeper: statistical analysis unavailable; "
+                                    "delivered the standard notice to the user."})
+        messages.append({"role": "assistant", "content": notice})
+        return notice, None
     except Exception as e:
         summary = f"tool error: {e}"
     messages.append({"role": "tool", "tool_call_id": tc.id, "content": summary})
